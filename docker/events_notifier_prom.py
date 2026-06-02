@@ -70,19 +70,26 @@ def watch_events():
     client = docker.DockerClient()
     try:
         for event in client.events(decode=True):
-            if event['Type'] == 'container':
+            if event.get('Type') == 'container':
+                # Docker 29 uses Action here; older engines/clients exposed status.
+                status = (event.get('Action') or event.get('status') or '').strip()
+                if not status:
+                    print_timed(f"Skipping container event without status/action: {event}")
+                    continue
+
                 # TODO: make it configurable which states to not export
-                if event['status'].startswith(('exec_start', 'exec_create', 'exec_detach')):
+                if status.startswith(('exec_start', 'exec_create', 'exec_detach')):
                     # ignore exec_start, exec_create and exec_detach, these dont seem helpful
                     continue
 
-                attributes = event['Actor']['Attributes']
+                actor = event.get('Actor') or {}
+                attributes = actor.get('Attributes') or {}
                 EVENTS.labels(
                     **{
-                        'status': event['status'].strip(),
+                        'status': status,
                         'docker_hostname': DOCKER_HOSTNAME,
-                        'image': event.get('from', ''),
-                        'container_id': event.get('Actor', {}).get('ID', ''),
+                        'image': event.get('from', attributes.get('image', '')),
+                        'container_id': actor.get('ID', event.get('id', '')),
                         'container_attributes_name': attributes.get('name', ''),
                         'container_attributes_exitcode': attributes.get('exitCode', ''),
                         'container_attributes_com_docker_stack_namespace': attributes.get('com.docker.stack.namespace', ''),
